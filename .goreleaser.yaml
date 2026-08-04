@@ -1,0 +1,65 @@
+version: 2
+
+project_name: sealclub
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: sealclub
+    main: ./cmd/sealclub
+    binary: sealclub
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+brews:
+  - name: sealclub
+    repository:
+      owner: sealdotclub
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://seal.club"
+    description: "CLI for the seal.club PDF sealing API"
+    license: "Apache-2.0"
+    commit_author:
+      name: seal.club
+      email: hello@seal.club
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+    test: |
+      assert_match "usage: sealclub", shell_output("#{bin}/sealclub -h")
+      assert_match version.to_s, shell_output("#{bin}/sealclub -version")
