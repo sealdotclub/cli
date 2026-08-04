@@ -20,9 +20,13 @@ sealclub doc.pdf > sealed.pdf
 
 # in-place
 sealclub doc.pdf --replace
+
+# suppress spinner / status
+sealclub doc.pdf --quiet
 ```
 
 Optional: `SEAL_API_BASE_URL` (default `https://api.seal.club`).
+
 
 ## Install from source
 

@@ -17,7 +17,14 @@ import (
 var version = "dev"
 
 func main() {
-	cmd := newRoot(os.Stdin, os.Stdout, os.Stderr, isTerminal(os.Stdin), isTerminal(os.Stdout))
+	cmd := newRoot(
+		os.Stdin,
+		os.Stdout,
+		os.Stderr,
+		isTerminal(os.Stdin),
+		isTerminal(os.Stdout),
+		isTerminal(os.Stderr),
+	)
 	err := fang.Execute(
 		context.Background(),
 		cmd,
@@ -51,10 +58,11 @@ func runtimeError(err error) error {
 	return &exitError{code: 1, msg: err.Error()}
 }
 
-func newRoot(stdin io.Reader, stdout, stderr io.Writer, stdinIsTTY, stdoutIsTTY bool) *cobra.Command {
+func newRoot(stdin io.Reader, stdout, stderr io.Writer, stdinIsTTY, stdoutIsTTY, stderrIsTTY bool) *cobra.Command {
 	var (
 		output  string
 		replace bool
+		quiet   bool
 	)
 
 	cmd := &cobra.Command{
@@ -75,8 +83,9 @@ Requires SEAL_API_KEY. Optional SEAL_API_BASE_URL (default https://api.seal.club
   cat doc.pdf | sealclub > sealed.pdf
   sealclub doc.pdf > sealed.pdf
 
-  # in-place
-  sealclub doc.pdf --replace`,
+  # in-place / quiet
+  sealclub doc.pdf --replace
+  sealclub doc.pdf --quiet`,
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -95,6 +104,8 @@ Requires SEAL_API_KEY. Optional SEAL_API_BASE_URL (default https://api.seal.club
 				return usageError("use either --output or --replace, not both")
 			}
 
+			status := newStatusWriter(stderr, quiet, stderrIsTTY)
+
 			pdf, inputPath, err := readInput(inputArg, stdin, stdinIsTTY)
 			if err != nil {
 				return usageError("%s", err.Error())
@@ -110,7 +121,9 @@ Requires SEAL_API_KEY. Optional SEAL_API_BASE_URL (default https://api.seal.club
 				return runtimeError(err)
 			}
 
+			stop := status.start("Sealing")
 			sealed, err := client.Seal(pdf)
+			stop()
 			if err != nil {
 				return runtimeError(err)
 			}
@@ -125,7 +138,7 @@ Requires SEAL_API_KEY. Optional SEAL_API_BASE_URL (default https://api.seal.club
 			if err := os.WriteFile(dest, sealed, 0o644); err != nil {
 				return runtimeError(err)
 			}
-			fmt.Fprintln(stderr, dest)
+			status.success(dest)
 			return nil
 		},
 	}
@@ -136,6 +149,7 @@ Requires SEAL_API_KEY. Optional SEAL_API_BASE_URL (default https://api.seal.club
 	cmd.Flags().StringVarP(&output, "output", "o", "", "Write sealed PDF to this path")
 	cmd.Flags().BoolVar(&replace, "replace", false, "Replace the input file with the sealed PDF")
 	cmd.Flags().BoolVar(&replace, "in-place", false, "Alias for --replace")
+	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress progress spinner and status output")
 	_ = cmd.Flags().MarkHidden("in-place")
 
 	return cmd
@@ -143,7 +157,7 @@ Requires SEAL_API_KEY. Optional SEAL_API_BASE_URL (default https://api.seal.club
 
 // run executes the command for tests (without Fang styling).
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer, stdinIsTTY, stdoutIsTTY bool) int {
-	cmd := newRoot(stdin, stdout, stderr, stdinIsTTY, stdoutIsTTY)
+	cmd := newRoot(stdin, stdout, stderr, stdinIsTTY, stdoutIsTTY, false)
 	cmd.Version = version
 	cmd.SetArgs(args)
 	if err := cmd.Execute(); err != nil {
