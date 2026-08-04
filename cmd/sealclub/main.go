@@ -2,124 +2,159 @@
 package main
 
 import (
-	"flag"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
 
+	"charm.land/fang/v2"
 	sealclub "github.com/sealdotclub/go-sdk"
+	"github.com/spf13/cobra"
 )
 
 // Set by goreleaser ldflags.
 var version = "dev"
 
 func main() {
-	os.Exit(run(
-		os.Args[1:],
-		os.Stdin,
-		os.Stdout,
-		os.Stderr,
-		isTerminal(os.Stdin),
-		isTerminal(os.Stdout),
-	))
+	cmd := newRoot(os.Stdin, os.Stdout, os.Stderr, isTerminal(os.Stdin), isTerminal(os.Stdout))
+	err := fang.Execute(
+		context.Background(),
+		cmd,
+		fang.WithVersion(version),
+		fang.WithNotifySignal(os.Interrupt),
+	)
+	if err != nil {
+		var ee *exitError
+		if errors.As(err, &ee) {
+			os.Exit(ee.code)
+		}
+		os.Exit(1)
+	}
 }
 
-func run(args []string, stdin io.Reader, stdout, stderr io.Writer, stdinIsTTY, stdoutIsTTY bool) int {
-	fs := flag.NewFlagSet("sealclub", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+type exitError struct {
+	code int
+	msg  string
+}
 
+func (e *exitError) Error() string { return e.msg }
+
+func usageError(format string, args ...any) error {
+	return &exitError{code: 2, msg: fmt.Sprintf(format, args...)}
+}
+
+func runtimeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &exitError{code: 1, msg: err.Error()}
+}
+
+func newRoot(stdin io.Reader, stdout, stderr io.Writer, stdinIsTTY, stdoutIsTTY bool) *cobra.Command {
 	var (
 		output  string
 		replace bool
-		showVer bool
 	)
-	fs.StringVar(&output, "o", "", "output path")
-	fs.StringVar(&output, "output", "", "output path")
-	fs.BoolVar(&replace, "replace", false, "replace the input file with the sealed PDF")
-	fs.BoolVar(&replace, "in-place", false, "alias for --replace")
-	fs.BoolVar(&showVer, "version", false, "print version and exit")
 
-	fs.Usage = func() {
-		fmt.Fprintf(stderr, "usage: sealclub [options] [input.pdf|-]\n\n")
-		fmt.Fprintf(stderr, "Seal a PDF with seal.club.\n\n")
-		fmt.Fprintf(stderr, "If input is omitted or '-', read PDF bytes from stdin.\n")
-		fmt.Fprintf(stderr, "With a file input and a terminal stdout, write <input>.sealed.pdf\n")
-		fmt.Fprintf(stderr, "unless -o/--output or --replace is set. Redirected stdout receives\n")
-		fmt.Fprintf(stderr, "the sealed PDF. Stdin input defaults to stdout.\n\n")
-		fmt.Fprintf(stderr, "Environment:\n")
-		fmt.Fprintf(stderr, "  SEAL_API_KEY         API key (required)\n")
-		fmt.Fprintf(stderr, "  SEAL_API_BASE_URL    API base URL (default https://api.seal.club)\n\n")
-		fmt.Fprintf(stderr, "Options:\n")
-		fs.PrintDefaults()
+	cmd := &cobra.Command{
+		Use:   "sealclub [input.pdf|-]",
+		Short: "Seal a PDF with seal.club",
+		Long: `Seal a PDF with the seal.club API.
+
+Pass a file path, or omit it / use "-" to read PDF bytes from stdin.
+File input on a terminal writes <input>.sealed.pdf by default.
+Redirected stdout (or stdin input) writes the sealed PDF to stdout.
+
+Requires SEAL_API_KEY. Optional SEAL_API_BASE_URL (default https://api.seal.club).`,
+		Example: `  # file → file
+  sealclub doc.pdf
+  sealclub doc.pdf -o sealed.pdf
+
+  # pipes
+  cat doc.pdf | sealclub > sealed.pdf
+  sealclub doc.pdf > sealed.pdf
+
+  # in-place
+  sealclub doc.pdf --replace`,
+		Args:          cobra.MaximumNArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			inputArg := ""
+			if len(args) == 1 {
+				inputArg = args[0]
+			}
+
+			// No args on a terminal → help (not an error).
+			if inputArg == "" && stdinIsTTY {
+				return cmd.Help()
+			}
+
+			if output != "" && replace {
+				return usageError("use either --output or --replace, not both")
+			}
+
+			pdf, inputPath, err := readInput(inputArg, stdin, stdinIsTTY)
+			if err != nil {
+				return usageError("%s", err.Error())
+			}
+
+			dest, useStdout, err := resolveOutput(inputPath, output, replace, stdoutIsTTY)
+			if err != nil {
+				return usageError("%s", err.Error())
+			}
+
+			client, err := sealclub.FromEnv()
+			if err != nil {
+				return runtimeError(err)
+			}
+
+			sealed, err := client.Seal(pdf)
+			if err != nil {
+				return runtimeError(err)
+			}
+
+			if useStdout {
+				if _, err := stdout.Write(sealed); err != nil {
+					return runtimeError(err)
+				}
+				return nil
+			}
+
+			if err := os.WriteFile(dest, sealed, 0o644); err != nil {
+				return runtimeError(err)
+			}
+			fmt.Fprintln(stderr, dest)
+			return nil
+		},
 	}
 
-	if err := fs.Parse(args); err != nil {
-		if err == flag.ErrHelp {
-			return 0
+	cmd.SetIn(stdin)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.Flags().StringVarP(&output, "output", "o", "", "Write sealed PDF to this path")
+	cmd.Flags().BoolVar(&replace, "replace", false, "Replace the input file with the sealed PDF")
+	cmd.Flags().BoolVar(&replace, "in-place", false, "Alias for --replace")
+	_ = cmd.Flags().MarkHidden("in-place")
+
+	return cmd
+}
+
+// run executes the command for tests (without Fang styling).
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer, stdinIsTTY, stdoutIsTTY bool) int {
+	cmd := newRoot(stdin, stdout, stderr, stdinIsTTY, stdoutIsTTY)
+	cmd.Version = version
+	cmd.SetArgs(args)
+	if err := cmd.Execute(); err != nil {
+		var ee *exitError
+		if errors.As(err, &ee) {
+			fmt.Fprintln(stderr, "error:", ee.msg)
+			return ee.code
 		}
-		return 2
-	}
-	if showVer {
-		fmt.Fprintln(stdout, version)
-		return 0
-	}
-
-	positional := fs.Args()
-	if len(positional) > 1 {
-		fmt.Fprintf(stderr, "error: unexpected arguments: %s\n", strings.Join(positional[1:], " "))
-		fs.Usage()
-		return 2
-	}
-
-	inputArg := ""
-	if len(positional) == 1 {
-		inputArg = positional[0]
-	}
-
-	if output != "" && replace {
-		fmt.Fprintln(stderr, "error: use either --output or --replace, not both")
-		return 2
-	}
-
-	pdf, inputPath, err := readInput(inputArg, stdin, stdinIsTTY)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
-	}
-
-	dest, useStdout, err := resolveOutput(inputPath, output, replace, stdoutIsTTY)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
-	}
-
-	client, err := sealclub.FromEnv()
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
+		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-
-	sealed, err := client.Seal(pdf)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 1
-	}
-
-	if useStdout {
-		if _, err := stdout.Write(sealed); err != nil {
-			fmt.Fprintf(stderr, "error: %v\n", err)
-			return 1
-		}
-		return 0
-	}
-
-	if err := os.WriteFile(dest, sealed, 0o644); err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 1
-	}
-	fmt.Fprintln(stderr, dest)
 	return 0
 }
 
@@ -179,10 +214,6 @@ func resolveOutput(inputPath, output string, replace, stdoutIsTTY bool) (dest st
 }
 
 func defaultSealedPath(inputPath string) string {
-	ext := filepath.Ext(inputPath)
-	if ext == "" {
-		return inputPath + ".sealed.pdf"
-	}
 	return inputPath + ".sealed.pdf"
 }
 

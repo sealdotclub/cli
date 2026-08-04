@@ -91,32 +91,37 @@ func TestResolveOutput(t *testing.T) {
 	}
 }
 
-func TestRunVersionAndUsage(t *testing.T) {
+func TestRunVersionHelpAndNoArgs(t *testing.T) {
 	t.Parallel()
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-version"}, bytes.NewReader(nil), &stdout, &stderr, true, true)
+	code := run([]string{"--version"}, bytes.NewReader(nil), &stdout, &stderr, true, true)
 	if code != 0 {
 		t.Fatalf("version exit=%d stderr=%s", code, stderr.String())
 	}
-	if strings.TrimSpace(stdout.String()) != version {
-		t.Fatalf("version=%q", stdout.String())
+	if !strings.Contains(stdout.String(), version) {
+		t.Fatalf("version output=%q", stdout.String())
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	code = run([]string{"-h"}, bytes.NewReader(nil), &stdout, &stderr, true, true)
+	code = run([]string{"--help"}, bytes.NewReader(nil), &stdout, &stderr, true, true)
 	if code != 0 {
 		t.Fatalf("help exit=%d stderr=%s", code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "usage: sealclub") {
-		t.Fatalf("help missing usage: %q", stderr.String())
+	help := stdout.String() + stderr.String()
+	if !strings.Contains(help, "sealclub") || !strings.Contains(help, "--output") {
+		t.Fatalf("help missing expected content: %q", help)
 	}
 
 	stdout.Reset()
 	stderr.Reset()
 	code = run(nil, bytes.NewReader(nil), &stdout, &stderr, true, true)
-	if code != 2 {
-		t.Fatalf("no input exit=%d stderr=%s", code, stderr.String())
+	if code != 0 {
+		t.Fatalf("no-args help exit=%d stderr=%s", code, stderr.String())
+	}
+	help = stdout.String() + stderr.String()
+	if !strings.Contains(help, "Seal a PDF") {
+		t.Fatalf("no-args should show help: %q", help)
 	}
 }
 
