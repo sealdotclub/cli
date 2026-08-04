@@ -4,6 +4,7 @@ Command-line client for [seal.club](https://seal.club).
 
 ```bash
 brew tap sealdotclub/tap
+brew trust sealdotclub/tap   # Homebrew 6+
 brew install sealclub
 export SEAL_API_KEY=sk_test_...
 ```
