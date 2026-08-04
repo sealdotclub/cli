@@ -46,20 +46,5 @@ changelog:
       - "^docs:"
       - "^test:"
 
-brews:
-  - name: sealclub
-    repository:
-      owner: sealdotclub
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    directory: Formula
-    homepage: "https://seal.club"
-    description: "CLI for the seal.club PDF sealing API"
-    license: "Apache-2.0"
-    commit_author:
-      name: seal.club
-      email: hello@seal.club
-    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
-    test: |
-      assert_match "usage: sealclub", shell_output("#{bin}/sealclub -h")
-      assert_match version.to_s, shell_output("#{bin}/sealclub -version")
+# Homebrew formula is maintained in sealdotclub/homebrew-tap.
+# Auto-push requires a HOMEBREW_TAP_GITHUB_TOKEN with write access to that repo.
