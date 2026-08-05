@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"charm.land/fang/v2"
 	sealclub "github.com/sealdotclub/go-sdk"
@@ -71,7 +73,7 @@ func newRoot(stdin io.Reader, stdout, stderr io.Writer, stdinIsTTY, stdoutIsTTY,
 		Long: `Seal a PDF with the seal.club API.
 
 Pass a file path, or omit it / use "-" to read PDF bytes from stdin.
-File input on a terminal writes <input>.sealed.pdf by default.
+File input on a terminal writes <name>.sealed.pdf by default.
 Redirected stdout (or stdin input) writes the sealed PDF to stdout.
 
 Requires SEAL_API_KEY. Optional SEAL_API_BASE_URL (default https://api.seal.club).`,
@@ -228,7 +230,12 @@ func resolveOutput(inputPath, output string, replace, stdoutIsTTY bool) (dest st
 }
 
 func defaultSealedPath(inputPath string) string {
-	return inputPath + ".sealed.pdf"
+	ext := filepath.Ext(inputPath)
+	base := strings.TrimSuffix(inputPath, ext)
+	if base == "" {
+		base = inputPath
+	}
+	return base + ".sealed.pdf"
 }
 
 func isTerminal(f *os.File) bool {

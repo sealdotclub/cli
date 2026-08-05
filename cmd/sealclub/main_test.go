@@ -13,8 +13,9 @@ func TestDefaultSealedPath(t *testing.T) {
 	tests := []struct {
 		in, want string
 	}{
-		{"doc.pdf", "doc.pdf.sealed.pdf"},
-		{"/tmp/a.PDF", "/tmp/a.PDF.sealed.pdf"},
+		{"doc.pdf", "doc.sealed.pdf"},
+		{"/tmp/a.PDF", "/tmp/a.sealed.pdf"},
+		{"sample-local-pdf.pdf", "sample-local-pdf.sealed.pdf"},
 		{"noext", "noext.sealed.pdf"},
 	}
 	for _, tt := range tests {
@@ -40,7 +41,7 @@ func TestResolveOutput(t *testing.T) {
 			name:        "tty file defaults to sealed path",
 			inputPath:   "doc.pdf",
 			stdoutIsTTY: true,
-			wantDest:    "doc.pdf.sealed.pdf",
+			wantDest:    "doc.sealed.pdf",
 		},
 		{
 			name:        "redirected file goes to stdout",

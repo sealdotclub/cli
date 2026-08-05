@@ -10,7 +10,7 @@ export SEAL_API_KEY=sk_test_...
 ```
 
 ```bash
-# file → file (default: doc.pdf.sealed.pdf)
+# file → file (default: doc.sealed.pdf)
 sealclub doc.pdf
 sealclub doc.pdf --output sealed.pdf
 
